@@ -15,7 +15,6 @@ import (
 
 	"github.com/certusone/wormhole/node/pkg/common"
 	"github.com/certusone/wormhole/node/pkg/reporter"
-	"github.com/certusone/wormhole/node/pkg/supervisor"
 	"github.com/wormhole-foundation/wormhole/sdk/vaa"
 )
 
@@ -81,18 +80,6 @@ func (p *Processor) handleMessage(ctx context.Context, k *common.MessagePublicat
 			ConsistencyLevel: k.ConsistencyLevel,
 		},
 		Unreliable: k.Unreliable,
-	}
-
-	// A governance message should never be emitted on-chain
-	if v.EmitterAddress == vaa.GovernanceEmitter && v.EmitterChain == vaa.GovernanceChain {
-		supervisor.Logger(ctx).Error(
-			"EMERGENCY: PLEASE REPORT THIS IMMEDIATELY! A Solana message was emitted from the governance emitter. This should never be possible.",
-			zap.Stringer("emitter_chain", k.EmitterChain),
-			zap.Stringer("emitter_address", k.EmitterAddress),
-			zap.Uint32("nonce", k.Nonce),
-			zap.Stringer("txhash", k.TxHash),
-			zap.Time("timestamp", k.Timestamp))
-		return
 	}
 
 	// Ignore incoming observations when our database already has a quorum VAA for it.
