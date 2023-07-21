@@ -14,7 +14,6 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/certusone/wormhole/node/pkg/common"
-	"github.com/certusone/wormhole/node/pkg/reporter"
 	"github.com/certusone/wormhole/node/pkg/supervisor"
 	"github.com/wormhole-foundation/wormhole/sdk/vaa"
 )
@@ -153,8 +152,6 @@ func (p *Processor) handleMessage(ctx context.Context, k *common.MessagePublicat
 
 	messagesSignedTotal.With(prometheus.Labels{
 		"emitter_chain": k.EmitterChain.String()}).Add(1)
-
-	p.attestationEvents.ReportMessagePublication(&reporter.MessagePublication{VAA: v.VAA, InitiatingTxID: k.TxHash})
 
 	p.broadcastSignature(v, s, k.TxHash.Bytes())
 }
