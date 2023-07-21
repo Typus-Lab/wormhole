@@ -1004,6 +1004,34 @@ func BenchmarkCrypto(b *testing.B) {
 		})
 	})
 
+	b.Run("libp2p (RSA)", func(b *testing.B) {
+
+		r := math_rand.New(math_rand.NewSource(0)) //#nosec G404 testnet / devnet keys are public knowledge
+		p2pKey, _, err := libp2p_crypto.GenerateKeyPairWithReader(libp2p_crypto.RSA, 2048, r)
+		if err != nil {
+			panic(err)
+		}
+
+		b.Run("sign", func(b *testing.B) {
+			msgs := signingMsgs(b.N)
+			b.ResetTimer()
+			signMsgsP2p(p2pKey, msgs)
+		})
+
+		b.Run("verify", func(b *testing.B) {
+			msgs := signingMsgs(b.N)
+			signatures := signMsgsP2p(p2pKey, msgs)
+			b.ResetTimer()
+
+			// RSA.Verify
+			for i := 0; i < b.N; i++ {
+				ok, err := p2pKey.GetPublic().Verify(msgs[i], signatures[i])
+				assert.NoError(b, err)
+				assert.True(b, ok)
+			}
+		})
+	})
+
 	b.Run("ethcrypto (secp256k1)", func(b *testing.B) {
 
 		gk := devnet.InsecureDeterministicEcdsaKeyByIndex(ethcrypto.S256(), 0)
