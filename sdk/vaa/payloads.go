@@ -151,6 +151,11 @@ type (
 		CodeId       uint64
 	}
 
+	// BodyWormchainIbcComposabilityMwContract is a governance message to set a specific contract (i.e. IBC Translator) for the ibc composability middleware to use
+	BodyWormchainIbcComposabilityMwContract struct {
+		ContractAddr [32]byte
+	}
+
 	// BodyCircleIntegrationUpdateWormholeFinality is a governance message to update the wormhole finality for Circle Integration.
 	BodyCircleIntegrationUpdateWormholeFinality struct {
 		TargetChainID ChainID
