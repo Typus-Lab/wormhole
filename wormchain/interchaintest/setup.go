@@ -14,6 +14,7 @@ import (
 	"github.com/strangelove-ventures/interchaintest/v4/chain/cosmos/wasm"
 	"github.com/strangelove-ventures/interchaintest/v4/ibc"
 	"github.com/strangelove-ventures/interchaintest/v4/testreporter"
+	"github.com/strangelove-ventures/interchaintest/v4/testutil"
 
 	"github.com/wormhole-foundation/wormchain/interchaintest/guardians"
 	"github.com/wormhole-foundation/wormchain/interchaintest/helpers"
@@ -30,6 +31,32 @@ var (
 	votingPeriod        = "10s"
 	maxDepositPeriod    = "10s"
 	coinType            = "118"
+	// configOverrides = map[string]any{
+	// 	"config/app.toml": testutil.Toml {
+	// 		// "enable-unsafe-cors": true,
+	// 		// "enabled-unsafe-cors": true,
+	// 		// "api.enabled-unsafe-cors": true,
+	// 		// "grpc-web.enable-unsafe-cors": true,
+	// 		"api": testutil.Toml {
+	// 			"enabled-unsafe-cors": true,
+	// 		},
+	// 		// "grpc-web": testutil.Toml {
+	// 		// 	"enable-unsafe-cors": true,
+	// 		// },
+	// 	},
+	// 	"config/config.toml": testutil.Toml {
+	// 		// "enable-unsafe-cors": true,
+	// 		// "enabled-unsafe-cors": true,
+	// 		// "api.enabled-unsafe-cors": true,
+	// 		// "grpc-web.enable-unsafe-cors": true,
+	// 		"api": testutil.Toml {
+	// 			"enabled-unsafe-cors": true,
+	// 		},
+	// 		// "grpc-web": testutil.Toml {
+	// 		// 	"enable-unsafe-cors": true,
+	// 		// },
+	// 	},
+	// }
 	wormchainConfig     = ibc.ChainConfig{
 		Type:    "cosmos",
 		Name:    "wormchain",
@@ -51,6 +78,7 @@ var (
 		TrustingPeriod: "112h",
 		NoHostMount:    false,
 		EncodingConfig: wormchainEncoding(),
+		// ConfigFileOverrides: configOverrides,
 	}
 	numVals      = 1
 	numFullNodes = 1
@@ -71,6 +99,29 @@ func CreateChains(t *testing.T, guardians guardians.ValSet) []ibc.Chain {
 	// Create chain factory with wormchain
 	wormchainConfig.ModifyGenesis = ModifyGenesis(votingPeriod, maxDepositPeriod, guardians)
 
+	configOverrides := make(map[string]any)
+
+	appTomlOverrides := make(testutil.Toml)
+	configTomlOverrides := make(testutil.Toml)
+
+	apiOverrides := make(testutil.Toml)
+	apiOverrides["enabled-unsafe-cors"] = true
+	appTomlOverrides["api"] = apiOverrides
+	grpcOverrides := make(testutil.Toml)
+	grpcOverrides["enable-unsafe-cors"] = true
+	appTomlOverrides["grpc-web"] = grpcOverrides
+
+	rpcOverrides := make(testutil.Toml)
+	rpcOverrides["cors_allowed_origins"] = []string{"*"}
+	configTomlOverrides["rpc"] = rpcOverrides
+
+	configOverrides["config/app.toml"] = appTomlOverrides
+	configOverrides["config/config.toml"] = configTomlOverrides
+
+	fmt.Println("configOverrides: ", configOverrides)
+
+	wormchainConfig.ConfigFileOverrides = configOverrides
+
 	cf := interchaintest.NewBuiltinChainFactory(zaptest.NewLogger(t), []*interchaintest.ChainSpec{
 		{
 			ChainName:     "wormchain",
@@ -86,8 +137,9 @@ func CreateChains(t *testing.T, guardians guardians.ValSet) []ibc.Chain {
 			Version: "v15.1.2",
 			ChainConfig: ibc.ChainConfig{
 				ChainID:        "osmosis-1002", // hardcoded handling in osmosis binary for osmosis-1, so need to override to something different.
-				GasPrices:      "1.0uosmo",
+				GasPrices:      "0.01uosmo",
 				EncodingConfig: wasm.WasmEncoding(),
+				ConfigFileOverrides: configOverrides,
 			},
 		},
 	})

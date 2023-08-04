@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"strconv"
 	"testing"
+	"encoding/hex"
 
 	"github.com/strangelove-ventures/interchaintest/v4/ibc"
 	"github.com/stretchr/testify/require"
@@ -57,8 +58,12 @@ type SubmitVaa struct {
 func TbRegisterChainMsg(t *testing.T, chainID uint16, emitterAddr string, guardians *guardians.ValSet) []byte {
 	emitterBz := [32]byte{}
 	eIndex := 32
-	for i := len(emitterAddr); i > 0; i-- {
-		emitterBz[eIndex-1] = emitterAddr[i-1]
+
+	emitterBytes, err := hex.DecodeString(emitterAddr)
+	require.NoError(t, err)
+
+	for i := len(emitterBytes); i > 0; i-- {
+		emitterBz[eIndex-1] = emitterBytes[i-1]
 		eIndex--
 	}
 	bodyTbRegisterChain := vaa.BodyTokenBridgeRegisterChain{
@@ -100,8 +105,10 @@ func TbRegisterForeignAsset(t *testing.T, tokenAddr string, chainID uint16, emit
 
 	emitterBz := [32]byte{}
 	eIndex := 32
-	for i := len(emitterAddr); i > 0; i-- {
-		emitterBz[eIndex-1] = emitterAddr[i-1]
+	emitterBytes, err := hex.DecodeString(emitterAddr)
+	require.NoError(t, err)
+	for i := len(emitterBytes); i > 0; i-- {
+		emitterBz[eIndex-1] = emitterBytes[i-1]
 		eIndex--
 	}
 	v := generateVaa(0, guardians, vaa.ChainID(chainID), vaa.Address(emitterBz), payload.Bytes())

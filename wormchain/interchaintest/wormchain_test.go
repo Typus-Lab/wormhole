@@ -33,11 +33,11 @@ import (
 // Note: once wormchain is added to heighliner, setup will not be required. Will just need to run the test case / last step.
 
 var (
-	GaiaChainID = uint16(11)
-	OsmoChainID = uint16(12)
+	GaiaChainID = uint16(4001)
+	OsmoChainID = uint16(4000)
 
-	ExternalChainId          = uint16(123)
-	ExternalChainEmitterAddr = "0x123EmitterAddress"
+	ExternalChainId          = uint16(2)
+	ExternalChainEmitterAddr = "0290FB167208Af455bB137780163b7B7a9a10C16"
 
 	Asset1Name         = "Wrapped BTC"
 	Asset1Symbol       = "XBTC"
@@ -159,6 +159,12 @@ func TestWormchain(t *testing.T) {
 	// Allowlist worm/gaia chain id / channel
 	wormGaiaAllowlistMsg := helpers.SubmitUpdateChainToChannelMapMsg(t, GaiaChainID, wormToGaiaChannel.ChannelID, guardians)
 	_, err = wormchain.ExecuteContract(ctx, "faucet", ibcTranslatorContractAddr, wormGaiaAllowlistMsg)
+
+	fmt.Println("pausing for dev env")
+	// wait for a bunch of blocks to keep from shutting down
+	err = testutil.WaitForBlocks(ctx, 1000000, wormchain)
+	require.NoError(t, err)
+	return
 
 	// Create and process a simple ibc payload3: Transfers 10.000_018 of asset1 from external chain through wormchain to gaia user
 	simplePayload := helpers.CreateGatewayIbcTokenBridgePayloadSimple(t, GaiaChainID, gaiaUser.Bech32Address(gaia.Config().Bech32Prefix), 0, 1)
