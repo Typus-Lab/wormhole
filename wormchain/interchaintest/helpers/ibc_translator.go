@@ -50,7 +50,7 @@ func SetMiddlewareContract(
 	require.NoError(t, err)
 	vHex := hex.EncodeToString(vBz)
 
-	_, err = node.ExecTx(ctx, keyName, "wormhole", "set-middleware-contract", contractBech32Addr, vHex, "--gas", "auto")
+	_, err = node.ExecTx(ctx, keyName, "wormhole", "set-ibc-composability-mw-contract", contractBech32Addr, vHex, "--gas", "auto")
 	require.NoError(t, err)
 }
 
