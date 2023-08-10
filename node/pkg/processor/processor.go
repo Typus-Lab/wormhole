@@ -241,14 +241,13 @@ func (p *Processor) Run(ctx context.Context) error {
 		numWorkers = int(math.Ceil(float64(runtime.NumCPU()) * p.workerFactor))
 		p.logger.Info("processor configured to use workers", zap.Int("numWorkers", numWorkers), zap.Float64("workerFactor", p.workerFactor))
 	}
+	// Start the routine to do housekeeping tasks that don't need to be distributed to the workers. We will catch errors but not panics.
+	common.StartRunnable(ctx, errC, false, "processor_housekeeper", p.runHousekeeper)
 
-	// Start the routine to do housekeeping tasks that don't need to be distributed to the workers.
-	common.RunWithScissors(ctx, errC, "processor_housekeeper", p.runHousekeeper)
-
-	// Start the workers.
+	// Start the workers. We will catch errors but not panics.
 	for workerId := 1; workerId <= numWorkers; workerId++ {
 		workerId := workerId
-		common.RunWithScissors(ctx, errC, fmt.Sprintf("processor_worker_%d", workerId), p.runWorker)
+		common.StartRunnable(ctx, errC, false, fmt.Sprintf("processor_worker_%d", workerId), p.runWorker)
 	}
 
 	var err error
