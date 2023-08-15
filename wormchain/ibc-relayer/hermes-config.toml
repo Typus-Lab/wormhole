@@ -30,9 +30,9 @@ port = 3001
 [[chains]]
 id = 'localterra'
 type = 'CosmosSdk'
-rpc_addr = 'http://terra2-terrad:26657'
-event_source = { mode = 'push', url = 'ws://terra2-terrad:26657/websocket', batch_delay = '500ms' }
-grpc_addr = 'http://terra2-terrad:9090'
+rpc_addr = 'http://terra2-terrad:26658'
+event_source = { mode = 'push', url = 'ws://terra2-terrad:26658/websocket', batch_delay = '500ms' }
+grpc_addr = 'http://terra2-terrad:9091'
 rpc_timeout = '20s'
 account_prefix = 'terra'
 key_name = 'keyterra'
@@ -55,8 +55,8 @@ address_type = { derivation = 'cosmos' }
 [[chains]]
 id = 'wormchain'
 type = 'CosmosSdk'
-rpc_addr = 'http://wormchain:26657'
-event_source = { mode = 'push', url = 'ws://wormchain:26657/websocket', batch_delay = '500ms' }
+rpc_addr = 'http://wormchain:26659'
+event_source = { mode = 'push', url = 'ws://wormchain:26659/websocket', batch_delay = '500ms' }
 grpc_addr = 'http://wormchain:9090'
 rpc_timeout = '10s'
 account_prefix = 'wormhole'
