@@ -22,7 +22,6 @@ import (
 	"github.com/certusone/wormhole/node/pkg/readiness"
 	"github.com/certusone/wormhole/node/pkg/supervisor"
 	"github.com/certusone/wormhole/node/pkg/watchers"
-	eth_common "github.com/ethereum/go-ethereum/common"
 	"github.com/gagliardetto/solana-go"
 	lookup "github.com/gagliardetto/solana-go/programs/address-lookup-table"
 	"github.com/gagliardetto/solana-go/rpc"
@@ -161,6 +160,8 @@ const (
 var (
 	emptyAddressBytes = vaa.Address{}.Bytes()
 	emptyGapBytes     = []byte{0, 0, 0}
+
+	addressLookupTableProgramID = solana.MustPublicKeyFromBase58("AddressLookupTab1e1111111111111111111111111")
 )
 
 var (
@@ -483,8 +484,8 @@ func (s *SolanaWatcher) Run(ctx context.Context) error {
 					rangeEnd := slot
 
 					// Requesting each slot
-					for slot := rangeStart; slot <= rangeEnd; slot++ {
-						_slot := slot
+					for slotIdx := rangeStart; slotIdx <= rangeEnd; slotIdx++ {
+						_slot := slotIdx
 						common.RunWithScissors(ctx, s.errC, "SolanaWatcherSlotFetcher", func(ctx context.Context) error {
 							s.retryFetchBlock(ctx, logger, _slot, 0, false)
 							return nil
@@ -524,7 +525,7 @@ func (s *SolanaWatcher) retryFetchBlock(ctx context.Context, logger *zap.Logger,
 			return
 		}
 
-		time.Sleep(retryDelay)
+		time.Sleep(retryDelay) //nolint:forbidigo // TODO: This code should be refactored to not use time.Sleep
 
 		if logger.Level().Enabled(zapcore.DebugLevel) {
 			logger.Debug("retrying block",
@@ -581,7 +582,7 @@ func (s *SolanaWatcher) fetchBlock(ctx context.Context, logger *zap.Logger, slot
 			// Schedule a single retry just in case the Solana node was confused about the block being missing.
 			if emptyRetry < maxEmptyRetry {
 				common.RunWithScissors(ctx, s.errC, "delayedFetchBlock", func(ctx context.Context) error {
-					time.Sleep(retryDelay)
+					time.Sleep(retryDelay) //nolint:forbidigo // TODO: This code should be refactored to not use time.Sleep
 					s.fetchBlock(ctx, logger, slot, emptyRetry+1, isReobservation)
 					return nil
 				})
@@ -680,23 +681,26 @@ func (s *SolanaWatcher) processTransaction(ctx context.Context, rpcClient *rpc.C
 		return
 	}
 
-	var programIndex uint16
-	var shimProgramIndex uint16
-	var shimFound bool
+	var (
+		programIndex     uint16
+		coreFound        bool
+		shimProgramIndex uint16
+		shimFound        bool
+	)
 
 	// SECURITY: Mapping of AccountKeys matches the indexes associated with the original transaction.
 	// This is filled via a helper function. The ordering is AccountKeys (static accounts), Writable Account Lookup Table (ALT) entries, and Readable ALT entries.
-	//
 	for n, key := range tx.Message.AccountKeys {
 		if key.Equals(s.contract) {
 			programIndex = uint16(n) // #nosec G115 -- The solana runtime can only support 64 accounts per transaction max
+			coreFound = true
 		}
 		if s.shimEnabled && key.Equals(s.shimContractAddr) {
 			shimProgramIndex = uint16(n) // #nosec G115 -- The solana runtime can only support 64 accounts per transaction max
 			shimFound = true
 		}
 	}
-	if programIndex == 0 {
+	if !coreFound {
 		return
 	}
 
@@ -724,6 +728,30 @@ func (s *SolanaWatcher) processTransaction(ctx context.Context, rpcClient *rpc.C
 				numObservations++
 				if s.logger.Level().Enabled(zapcore.DebugLevel) {
 					s.logger.Debug("found a top-level wormhole shim instruction",
+						zap.Int("idx", i),
+						zap.Stringer("signature", signature),
+						zap.Uint64("slot", slot),
+					)
+				}
+			}
+		} else if isReobservation && inst.ProgramIDIndex == programIndex && len(inst.Data) > 0 && inst.Data[0] == closePostedMessageInstructionID {
+			// Rent reclamation: close_posted_message emits a CPI event containing
+			// the full message data before the account is zeroed. We only process
+			// these during reobservation — the normal transaction stream must NOT
+			// generate new observations as message accounts are garbage-collected,
+			// because the original message was already observed when it was posted.
+			found, err := s.processClosePostedMessageEvent(s.logger, programIndex, tx, meta.InnerInstructions, i, inst, alreadyProcessed, signature)
+			if err != nil {
+				s.logger.Error("malformed close_posted_message event",
+					zap.Error(err),
+					zap.Int("idx", i),
+					zap.Stringer("signature", signature),
+					zap.Uint64("slot", slot),
+				)
+			} else if found {
+				numObservations++
+				if s.logger.Level().Enabled(zapcore.DebugLevel) {
+					s.logger.Debug("found a close_posted_message event (reobservation)",
 						zap.Int("idx", i),
 						zap.Stringer("signature", signature),
 						zap.Uint64("slot", slot),
@@ -769,6 +797,31 @@ func (s *SolanaWatcher) processTransaction(ctx context.Context, rpcClient *rpc.C
 						numObservations++
 						if s.logger.Level().Enabled(zapcore.DebugLevel) {
 							s.logger.Debug("found an inner wormhole shim instruction",
+								zap.Int("outerIdx", outerIdx),
+								zap.Int("innerIdx", innerIdx),
+								zap.Stringer("signature", signature),
+								zap.Uint64("slot", slot),
+							)
+						}
+					}
+				} else if isReobservation && inst.ProgramIDIndex == programIndex && len(inst.Data) > 0 && inst.Data[0] == closePostedMessageInstructionID {
+					// Handle close_posted_message called via CPI from another
+					// program. Same reobservation-only policy as the top-level
+					// path: we never generate observations from the normal
+					// transaction stream for close events.
+					found, err := s.processInnerClosePostedMessageEvent(s.logger, programIndex, tx, inner.Instructions, outerIdx, innerIdx, inst, alreadyProcessed, signature)
+					if err != nil {
+						s.logger.Error("malformed inner close_posted_message event",
+							zap.Error(err),
+							zap.Int("outerIdx", outerIdx),
+							zap.Int("innerIdx", innerIdx),
+							zap.Stringer("signature", signature),
+							zap.Uint64("slot", slot),
+						)
+					} else if found {
+						numObservations++
+						if s.logger.Level().Enabled(zapcore.DebugLevel) {
+							s.logger.Debug("found an inner close_posted_message event (reobservation)",
 								zap.Int("outerIdx", outerIdx),
 								zap.Int("innerIdx", innerIdx),
 								zap.Stringer("signature", signature),
@@ -878,7 +931,7 @@ func (s *SolanaWatcher) retryFetchMessageAccount(ctx context.Context, rpcClient 
 			return
 		}
 
-		time.Sleep(retryDelay)
+		time.Sleep(retryDelay) //nolint:forbidigo // TODO: This code should be refactored to not use time.Sleep
 
 		s.logger.Info("retrying account",
 			zap.Uint64("slot", slot),
@@ -948,7 +1001,7 @@ func (s *SolanaWatcher) fetchMessageAccount(ctx context.Context, rpcClient *rpc.
 			zap.Binary("data", data))
 	}
 
-	return s.processMessageAccount(s.logger, data, acc, isReobservation, signature), false
+	return s.processMessageAccount(s.logger, data, acc, isReobservation, signature, false), false
 }
 
 func (s *SolanaWatcher) processAccountSubscriptionData(_ context.Context, logger *zap.Logger, data []byte, isReobservation bool) error {
@@ -1002,7 +1055,7 @@ func (s *SolanaWatcher) processAccountSubscriptionData(_ context.Context, logger
 	switch string(data[:3]) {
 	case accountPrefixReliable, accountPrefixUnreliable:
 		acc := solana.PublicKeyFromBytes([]byte(value.Pubkey))
-		s.processMessageAccount(logger, data, acc, isReobservation, solana.Signature{})
+		s.processMessageAccount(logger, data, acc, isReobservation, solana.Signature{}, false)
 	default:
 		break
 	}
@@ -1011,7 +1064,7 @@ func (s *SolanaWatcher) processAccountSubscriptionData(_ context.Context, logger
 }
 
 // SECURITY: Ownership check on account key must be done BEFORE this function is called.
-func (s *SolanaWatcher) processMessageAccount(logger *zap.Logger, data []byte, acc solana.PublicKey, isReobservation bool, signature solana.Signature) (numObservations uint32) {
+func (s *SolanaWatcher) processMessageAccount(logger *zap.Logger, data []byte, acc solana.PublicKey, isReobservation bool, signature solana.Signature, useSignatureAsTxID bool) (numObservations uint32) {
 	proposal, err := ParseMessagePublicationAccount(data)
 	if err != nil {
 		solanaAccountSkips.WithLabelValues(s.networkName, "parse_transfer_out").Inc()
@@ -1057,8 +1110,15 @@ func (s *SolanaWatcher) processMessageAccount(logger *zap.Logger, data []byte, a
 		}
 	}
 
-	var txHash eth_common.Hash
-	copy(txHash[:], acc[:])
+	var txID []byte
+	if useSignatureAsTxID && !signature.IsZero() {
+		// Close event path: use the Solana transaction signature as TxID,
+		// matching the shim convention.
+		txID = signature[:]
+	} else {
+		// Account-based path: use the message account pubkey as TxID.
+		txID = acc[:]
+	}
 
 	var reliable bool
 	switch string(data[:3]) {
@@ -1071,7 +1131,7 @@ func (s *SolanaWatcher) processMessageAccount(logger *zap.Logger, data []byte, a
 	}
 
 	observation := &common.MessagePublication{
-		TxID:             txHash.Bytes(),
+		TxID:             txID,
 		Timestamp:        time.Unix(int64(proposal.SubmissionTime), 0),
 		Nonce:            proposal.Nonce,
 		Sequence:         proposal.Sequence,
@@ -1166,6 +1226,17 @@ func (s *SolanaWatcher) populateLookupTableAccounts(ctx context.Context, rpcClie
 		info, err := rpcClient.GetAccountInfo(ctx, key)
 		if err != nil {
 			return fmt.Errorf("failed to get account info for key %s: %w", key, err)
+		}
+
+		// SECURITY: A lookup table account must be owned by the on-chain
+		// address-lookup-table program. Otherwise, attacker could spoof account data.
+		// Solana runtime ensures this isn't possible. This is an extra check in
+		// case the runtime changes.
+		if info.Value == nil {
+			return fmt.Errorf("lookup table account %s does not exist", key)
+		}
+		if !info.Value.Owner.Equals(addressLookupTableProgramID) {
+			return fmt.Errorf("lookup table account %s has invalid owner %s", key, info.Value.Owner)
 		}
 
 		tableContent, err := lookup.DecodeAddressLookupTableState(info.GetBinary())

@@ -424,35 +424,35 @@ func TestBodySlashingParamsUpdateDeserializeFailureTooLong(t *testing.T) {
 
 func TestBodyCoreRecoverChainIdSerialize(t *testing.T) {
 	expected := "00000000000000000000000000000000000000000000000000000000436f72650500000000000000000000000000000000000000000000000000000000000000010fa0"
-	BodyRecoverChainId := BodyRecoverChainId{
+	bodyRecoverChainID := BodyRecoverChainId{
 		Module:     "Core",
 		EvmChainID: uint256.NewInt(1),
 		NewChainID: 4000,
 	}
-	buf, err := BodyRecoverChainId.Serialize()
+	buf, err := bodyRecoverChainID.Serialize()
 	require.NoError(t, err)
 	assert.Equal(t, expected, hex.EncodeToString(buf))
 }
 
 func TestBodyTokenBridgeRecoverChainIdSerialize(t *testing.T) {
 	expected := "000000000000000000000000000000000000000000546f6b656e4272696467650300000000000000000000000000000000000000000000000000000000000000010fa0"
-	BodyRecoverChainId := BodyRecoverChainId{
+	bodyRecoverChainID := BodyRecoverChainId{
 		Module:     "TokenBridge",
 		EvmChainID: uint256.NewInt(1),
 		NewChainID: 4000,
 	}
-	buf, err := BodyRecoverChainId.Serialize()
+	buf, err := bodyRecoverChainID.Serialize()
 	require.NoError(t, err)
 	assert.Equal(t, expected, hex.EncodeToString(buf))
 }
 
 func TestBodyRecoverChainIdModuleTooLong(t *testing.T) {
-	BodyRecoverChainId := BodyRecoverChainId{
+	bodyRecoverChainID := BodyRecoverChainId{
 		Module:     "ModuleNameIsMoreThanThirtyTwoCharacters",
 		EvmChainID: uint256.NewInt(1),
 		NewChainID: 4000,
 	}
-	buf, err := BodyRecoverChainId.Serialize()
+	buf, err := bodyRecoverChainID.Serialize()
 	require.ErrorContains(t, err, "failed to left pad module: payload longer than 32 bytes")
 	assert.Nil(t, buf)
 }
@@ -484,6 +484,92 @@ func TestBodyCoreBridgeSetMessageFeeSerialize(t *testing.T) {
 	buf, err := bodyCoreBridgeSetMessageFee.Serialize()
 	require.NoError(t, err)
 	assert.Equal(t, expected, hex.EncodeToString(buf))
+}
+
+func TestBodyCoreBridgeTransferFeesSerialize(t *testing.T) {
+	const header = "00000000000000000000000000000000000000000000000000000000436f726504"
+	const amountHex = "0000000000000000000000000000000000000000000000000000000000000123"
+	const recipientHex = "00000000000000000000000000000000000000000000000000000000deadbeef"
+
+	var recipient Address
+	recipient[28] = 0xde
+	recipient[29] = 0xad
+	recipient[30] = 0xbe
+	recipient[31] = 0xef
+
+	t.Run("spec layout (Solana)", func(t *testing.T) {
+		body := BodyCoreBridgeTransferFees{
+			ChainID:   ChainIDSolana,
+			Amount:    uint256.NewInt(0x123),
+			Recipient: recipient,
+		}
+		buf, err := body.Serialize()
+		require.NoError(t, err)
+		// chain (uint16) || Amount || Recipient
+		expected := header + "0001" + amountHex + recipientHex
+		assert.Equal(t, expected, hex.EncodeToString(buf))
+	})
+
+	t.Run("cosmwasm layout (Injective)", func(t *testing.T) {
+		body := BodyCoreBridgeTransferFees{
+			ChainID:   ChainIDInjective,
+			Amount:    uint256.NewInt(0x123),
+			Recipient: recipient,
+		}
+		buf, err := body.Serialize()
+		require.NoError(t, err)
+		// chain (uint16) || Recipient || Amount  (reversed per CosmWasm core contract)
+		expected := header + "0013" + recipientHex + amountHex
+		assert.Equal(t, expected, hex.EncodeToString(buf))
+	})
+
+	t.Run("rejects nil amount", func(t *testing.T) {
+		body := BodyCoreBridgeTransferFees{
+			ChainID:   ChainIDSolana,
+			Recipient: recipient,
+		}
+		_, err := body.Serialize()
+		require.ErrorContains(t, err, "amount must be non-zero")
+	})
+
+	t.Run("rejects zero amount", func(t *testing.T) {
+		body := BodyCoreBridgeTransferFees{
+			ChainID:   ChainIDSolana,
+			Amount:    uint256.NewInt(0),
+			Recipient: recipient,
+		}
+		_, err := body.Serialize()
+		require.ErrorContains(t, err, "amount must be non-zero")
+	})
+
+	t.Run("rejects unset chain id", func(t *testing.T) {
+		body := BodyCoreBridgeTransferFees{
+			ChainID:   ChainIDUnset,
+			Amount:    uint256.NewInt(0x123),
+			Recipient: recipient,
+		}
+		_, err := body.Serialize()
+		require.ErrorContains(t, err, "chain id is required")
+	})
+
+	t.Run("rejects all-zero recipient", func(t *testing.T) {
+		body := BodyCoreBridgeTransferFees{
+			ChainID: ChainIDSolana,
+			Amount:  uint256.NewInt(0x123),
+			// Recipient left as zero-value Address{}
+		}
+		_, err := body.Serialize()
+		require.ErrorContains(t, err, "recipient must be non-zero")
+	})
+}
+
+func TestCoreBridgeTransferFeesUsesCosmWasmLayout(t *testing.T) {
+	for _, c := range []ChainID{ChainIDTerra2, ChainIDInjective, ChainIDSei} {
+		assert.True(t, CoreBridgeTransferFeesUsesCosmWasmLayout(c), "chain %d should use cosmwasm layout", c)
+	}
+	for _, c := range []ChainID{ChainIDSolana, ChainIDEthereum, ChainIDSui, ChainIDWormchain, ChainIDSeiEVM} {
+		assert.False(t, CoreBridgeTransferFeesUsesCosmWasmLayout(c), "chain %d should not use cosmwasm layout", c)
+	}
 }
 
 func TestBodyDelegatedGuardianSetConfig(t *testing.T) {

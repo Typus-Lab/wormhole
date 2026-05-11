@@ -328,6 +328,7 @@ func NewProcessor(
 		alternatePublisher:              alternatePublisher,
 
 		logger:                    supervisor.Logger(ctx),
+		gs:                        nil,
 		state:                     &aggregationState{observationMap{}},
 		delegateState:             &delegateAggregationState{delegateObservationMap{}},
 		ourAddr:                   crypto.PubkeyToAddress(guardianSigner.PublicKey(ctx)),
@@ -337,6 +338,7 @@ func NewProcessor(
 		notary:                    notary,
 		pythnetVaas:               make(map[string]PythNetVaaEntry),
 		gatewayRelayer:            gatewayRelayer,
+		updateVAALock:             sync.Mutex{},
 		batchObsvPubC:             make(chan *gossipv1.Observation, batchObsvPubChanSize),
 		updatedVAAs:               make(map[string]*updateVaaEntry),
 		networkID:                 networkID,
@@ -424,9 +426,8 @@ func (p *Processor) Run(ctx context.Context) error {
 				oldChains = oldDgc.ReadAll()
 			}
 
+			// This mutex is unlocked at the end of this select case
 			dgConfig.mu.Lock()
-			defer dgConfig.mu.Unlock()
-
 			chains := dgConfig.Chains
 
 			// Log details for removed chain configs
@@ -509,6 +510,7 @@ func (p *Processor) Run(ctx context.Context) error {
 			if err := p.dgc.Set(chains); err != nil {
 				p.logger.Error("delegate guardian config update failed", zap.Error(err))
 			}
+			dgConfig.mu.Unlock()
 		case k := <-p.msgC:
 			if k == nil {
 				p.logger.Error("received nil MessagePublication from msgC channel")
