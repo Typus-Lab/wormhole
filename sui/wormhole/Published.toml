@@ -3,8 +3,8 @@
 # This file SHOULD be committed to source control
 
 [published.mainnet]
-published-at = ""
-original-id = ""
+published-at = "0x5306f64e312b581766351c07af79c72fcb1cd25147157fdc2f8ad76de9a3fb6a"
+original-id = "0x5306f64e312b581766351c07af79c72fcb1cd25147157fdc2f8ad76de9a3fb6a"
 version = 1
 
 [published.testnet]
